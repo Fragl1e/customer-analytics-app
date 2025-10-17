@@ -1,35 +1,76 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
+import gspread
+from google.oauth2.service_account import Credentials
+from datetime import datetime
 
-st.title("お客さん集計アプリ")
+# ------------------------
+# 🔒 パスワード認証（Secrets）
+# ------------------------
+st.set_page_config(page_title="お客さんカウンター", layout="centered")
+PASSWORD = st.secrets["auth"]["password"]
 
-# データ保持（セッションごと）
-if "data" not in st.session_state:
-    st.session_state.data = pd.DataFrame(columns=["名前", "年齢", "性別", "購入金額"])
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
 
-# 入力フォーム
-with st.form("input_form"):
-    name = st.text_input("名前")
-    age = st.number_input("年齢", min_value=0, max_value=120, step=1)
-    gender = st.selectbox("性別", ["男性", "女性", "その他"])
-    amount = st.number_input("購入金額", min_value=0, step=100)
-    submitted = st.form_submit_button("登録")
+if not st.session_state.authenticated:
+    st.title("🔒 お客さんカウンター（ログイン）")
+    pw = st.text_input("パスワードを入力してください", type="password")
+    if pw:
+        if pw == PASSWORD:
+            st.session_state.authenticated = True
+            st.experimental_rerun()
+        else:
+            st.error("パスワードが違います")
+    st.stop()
 
-if submitted:
-    new_data = pd.DataFrame([[name, age, gender, amount]], columns=["名前", "年齢", "性別", "購入金額"])
-    st.session_state.data = pd.concat([st.session_state.data, new_data], ignore_index=True)
-    st.success("データを登録しました！")
+# ------------------------
+# ✅ Googleスプレッドシート接続
+# ------------------------
+scope = ["https://spreadsheets.google.com/feeds",
+         "https://www.googleapis.com/auth/drive"]
 
-# データ一覧
-st.subheader("登録データ一覧")
-st.dataframe(st.session_state.data)
+credentials = Credentials.from_service_account_info(
+    st.secrets["gcp_service_account"], scopes=scope)
+gc = gspread.authorize(credentials)
 
-# 集計・統計
-if not st.session_state.data.empty:
-    st.subheader("統計情報")
-    st.write(st.session_state.data.describe())
+SPREADSHEET_NAME = "customer_counter"
+sh = gc.open(SPREADSHEET_NAME)
+worksheet = sh.sheet1
 
-    st.subheader("性別ごとの購入平均")
-    gender_avg = st.session_state.data.groupby("性別")["購入金額"].mean()
-    st.bar_chart(gender_avg)
+# ------------------------
+# 📊 現在のカウント取得
+# ------------------------
+data = pd.DataFrame(worksheet.get_all_records())
+current_count = 0 if data.empty else data["人数"].iloc[-1]
+
+# ------------------------
+# 🧮 カウンター表示と操作
+# ------------------------
+st.title("👥 お客さんカウンター")
+st.metric(label="現在の人数", value=f"{current_count} 人")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("＋1人", use_container_width=True):
+        new_count = current_count + 1
+        worksheet.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), new_count])
+        st.success(f"{new_count}人目を記録しました！")
+        st.experimental_rerun()
+
+with col2:
+    if st.button("−1人", use_container_width=True):
+        new_count = max(current_count - 1, 0)
+        worksheet.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), new_count])
+        st.warning(f"{current_count} → {new_count} に減らしました。")
+        st.experimental_rerun()
+
+# ------------------------
+# ⚙️ 管理者用リセット（隠し）
+# ------------------------
+with st.expander("⚠️ 管理者用リセット"):
+    if st.button("リセット（0に戻す）"):
+        worksheet.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 0])
+        st.error("カウントを0にリセットしました。")
+        st.experimental_rerun()
