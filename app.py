@@ -14,7 +14,7 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    st.title("🔒 お客さんカウンター（ログイン）")
+    st.title("🔒 COUNTER（ログイン）")
     pw = st.text_input("パスワードを入力してください", type="password")
     if pw:
         if pw == PASSWORD:
@@ -55,7 +55,7 @@ else:
 # ------------------------
 # 🧮 カウンター操作
 # ------------------------
-st.title("👥 お客さんカウンター")
+st.title("👥 COUNTER")
 st.metric(label="現在の人数", value=f"{current_count} 人")
 
 col1, col2 = st.columns(2)
