@@ -7,7 +7,7 @@ from datetime import datetime
 # ------------------------
 # 🔒 パスワード認証
 # ------------------------
-st.set_page_config(page_title="お客さんカウンター", layout="centered")
+st.set_page_config(page_title="COUNTER", layout="centered")
 PASSWORD = st.secrets["auth"]["password"]
 
 if "authenticated" not in st.session_state:
