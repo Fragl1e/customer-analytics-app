@@ -1,100 +1,78 @@
 import streamlit as st
-import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+import pandas as pd
+import matplotlib.pyplot as plt
 
 # ------------------------
-# 🔒 パスワード認証
+# 🔒 パスワード設定
 # ------------------------
-st.set_page_config(page_title="COUNTER", layout="centered")
-PASSWORD = st.secrets["auth"]["password"]
+PASSWORD = "mysecret123"  # 後で Secrets に置き換え可能
 
+# セッション状態の初期化
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
+if "count" not in st.session_state:
+    st.session_state.count = 0
+if "log" not in st.session_state:
+    st.session_state.log = pd.DataFrame(columns=["timestamp", "count"])
 
+# ------------------------
+# 🔐 認証
+# ------------------------
 if not st.session_state.authenticated:
-    st.title("🔒 COUNTER（ログイン）")
-    pw = st.text_input("パスワードを入力してください", type="password")
+    st.title("🔒 人数カウンター（ログイン）")
+    pw = st.text_input("パスワードを入力", type="password")
+
     if pw:
         if pw == PASSWORD:
             st.session_state.authenticated = True
-            st.experimental_rerun()
+            st.experimental_rerun()  # 状態更新後に再読み込み
         else:
-            st.error("パスワードが違います")
-    st.stop()
+            st.error("パスワードが違います。")
+    st.stop()  # 認証されるまでここで停止
 
 # ------------------------
-# ✅ Googleスプレッドシート接続
+# ✅ 認証後アプリ本体
 # ------------------------
-scope = ["https://spreadsheets.google.com/feeds",
-         "https://www.googleapis.com/auth/drive"]
+st.title("👥 人数カウンター")
 
-credentials = Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"], scopes=scope)
-gc = gspread.authorize(credentials)
-
-SPREADSHEET_NAME = "customer_counter"
-sh = gc.open(SPREADSHEET_NAME)
-worksheet = sh.sheet1
-
-# ------------------------
-# 📊 データ取得
-# ------------------------
-data = pd.DataFrame(worksheet.get_all_records())
-
-if data.empty:
-    current_count = 0
-else:
-    current_count = data["人数"].iloc[-1]
-    # 日付・時間列を追加
-    data["時刻"] = pd.to_datetime(data["時刻"])
-    data["日付"] = data["時刻"].dt.date
-    data["時間帯"] = data["時刻"].dt.hour
-
-# ------------------------
-# 🧮 カウンター操作
-# ------------------------
-st.title("👥 COUNTER")
-st.metric(label="現在の人数", value=f"{current_count} 人")
-
-col1, col2 = st.columns(2)
+col1, col2 = st.columns([1, 1])
 
 with col1:
-    if st.button("＋1人", use_container_width=True):
-        new_count = current_count + 1
-        worksheet.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), new_count])
-        st.success(f"{new_count}人目を記録しました！")
-        st.experimental_rerun()
+    if st.button("＋1人"):
+        st.session_state.count += 1
+        # ログに記録（日時＋人数）
+        st.session_state.log = pd.concat(
+            [st.session_state.log, pd.DataFrame([[datetime.now(), st.session_state.count]], columns=["timestamp","count"])],
+            ignore_index=True
+        )
+        st.experimental_rerun()  # 状態更新後に再読み込み
 
 with col2:
-    if st.button("−1人", use_container_width=True):
-        new_count = max(current_count - 1, 0)
-        worksheet.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), new_count])
-        st.warning(f"{current_count} → {new_count} に減らしました。")
-        st.experimental_rerun()
+    if st.button("－1人"):
+        if st.session_state.count > 0:
+            st.session_state.count -= 1
+            st.session_state.log = pd.concat(
+                [st.session_state.log, pd.DataFrame([[datetime.now(), st.session_state.count]], columns=["timestamp","count"])],
+                ignore_index=True
+            )
+            st.experimental_rerun()
+
+st.subheader("現在の人数")
+st.metric("人数", st.session_state.count)
 
 # ------------------------
-# ⚙️ 管理者用リセット（隠し）
+# 📊 日別・時間帯別グラフ
 # ------------------------
-with st.expander("⚠️ 管理者用リセット"):
-    if st.button("リセット（0に戻す）"):
-        worksheet.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 0])
-        st.error("カウントを0にリセットしました。")
-        st.experimental_rerun()
+if not st.session_state.log.empty:
+    st.subheader("日別人数推移")
+    st.session_state.log['date'] = st.session_state.log['timestamp'].dt.date
+    daily = st.session_state.log.groupby('date')['count'].max()
+    st.bar_chart(daily)
 
-# ------------------------
-# 📈 日別・時間帯別集計グラフ
-# ------------------------
-if not data.empty:
-    st.subheader("日別の人数推移")
-    # 日別の最終人数を取得
-    daily_counts = data.groupby("日付")["人数"].last()
-    st.bar_chart(daily_counts)
-
-    st.subheader("時間帯ごとの人数変化（同日）")
-    selected_date = st.date_input("日付を選択", value=data["日付"].max())
-    hourly_counts = data[data["日付"] == selected_date].groupby("時間帯")["人数"].last()
-    # 0-23時まで全て表示
-    hourly_counts = hourly_counts.reindex(range(24), fill_value=0)
-    st.bar_chart(hourly_counts)
+    st.subheader("時間帯別人数推移")
+    st.session_state.log['hour'] = st.session_state.log['timestamp'].dt.hour
+    hourly = st.session_state.log.groupby('hour')['count'].max()
+    st.bar_chart(hourly)
